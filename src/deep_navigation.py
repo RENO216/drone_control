@@ -12,7 +12,6 @@ import math
 
 
 class deep_navigation:
-    
     def __init__(self,dest_x = 5. , dest_y = 5. ):
         self.steer_sub = rospy.Subscriber("steer", Float32, self.steer_update)
         self.coll_sub = rospy.Subscriber("coll", Float32, self.coll_update)

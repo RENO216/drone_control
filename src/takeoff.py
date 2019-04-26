@@ -13,16 +13,20 @@ import zipfile
 
 def takeoff():
         pub = rospy.Publisher("ardrone/takeoff", Empty, queue_size=10 )
-        land_pub = rospy.Publisher("ardrone/land", Empty, queue_size=1)
+        # land_pub = rospy.Publisher("ardrone/land", Empty, queue_size=1)
         rospy.init_node('takeoff', anonymous=True, disable_signals=True)
         rate = rospy.Rate(10) # 10hz
-        while not rospy.is_shutdown():
-          try:
+        
+        while not rospy.is_shutdown():       
             pub.publish(Empty())
-            rate.sleep()
-          except KeyboardInterrupt:   
-            land_pub.publish(Empty())
-            break
+            rate.sleep()   
+
+
 
 if __name__ == '__main__':
-        takeoff()
+  try:
+    takeoff()
+  except KeyboardInterrupt:
+    # land()
+    print("LANDED")
+    pass

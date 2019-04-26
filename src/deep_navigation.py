@@ -12,7 +12,7 @@ import math
 
 
 class deep_navigation:
-    def __init__(self,dest_x = 5. , dest_y = 5. ):
+    def __init__(self,dest_x = 3. , dest_y = 3. ):
         self.steer_sub = rospy.Subscriber("steer", Float32, self.steer_update)
         self.coll_sub = rospy.Subscriber("coll", Float32, self.coll_update)
         self.velocity_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
@@ -22,7 +22,7 @@ class deep_navigation:
         self.coll = 1
         self.steer = 0
         # original position
-        self.time_interval = 5.
+        self.time_interval = 0.
         self.loc_x = 0.
         self.loc_y = 0.
         self.curr_angle = 0.
@@ -36,7 +36,7 @@ class deep_navigation:
         self.coll = data.data
         self.move()
 
-    def move(self, adjust_interval = 5.):
+    def move(self, adjust_interval = 4.):
         sgn = lambda x: 1. if x > 0 else -1. if x < 0 else 0.
         
         vel_msg = Twist()
@@ -51,37 +51,42 @@ class deep_navigation:
             self.velocity_publisher.publish(vel_msg)
             print("Arrived ", self.loc_x, self.loc_y)
         else:        
-            t0 = rospy.Time.now().to_sec()
+            t0 = rospy.Time.now().to_sec() * 1000 # in second
             # check whether toward destination
             if self.time_interval >= adjust_interval:
-
                 dest_angle = np.arctan((self.dest_y - self.loc_y)/(self.dest_x - self.loc_x))
-
                 vel_msg.linear.x = 0
-                vel_msg.angular.z = sgn(dest_angle)
-                self.velocity_publisher.publish(vel_msg)
-                t1=rospy.Time.now().to_sec()
-                self.curr_angle += vel_msg.angular.z * 2 * np.pi * (t1 - t0)    
+                
                 if abs(self.curr_angle - dest_angle) <= 0.2:  # 12 degree 
-                    self.time_interval = 0  
+                    self.time_interval = 0
+                    vel_msg.angular.z = 0
+                else:
+                    print("NEED ADJUST! CURRENT angle:", self.curr_angle)
+                    vel_msg.angular.z = sgn(dest_angle - self.curr_angle) / 2
+                self.velocity_publisher.publish(vel_msg)
+                t1=rospy.Time.now().to_sec() * 1000
+                self.curr_angle += vel_msg.angular.z * 2 * np.pi * (t1 - t0)   
+                print("ADJUSTED angle:",self.curr_angle,"dest", dest_angle, "diff", -self.curr_angle+dest_angle) 
+                  
             
             else:
-                # move to avoid collision       
-                if self.coll <= 0.9:
-                    vel_msg.linear.x = 0.05
+                # move to avoid collision     
+                if self.coll <= 0.8:
+                    vel_msg.linear.x = 0
                 else:
                     vel_msg.linear.x = 0    
-                vel_msg.angular.z = sgn(self.steer)
+                vel_msg.angular.z = sgn(self.steer) / 2
 
                 self.velocity_publisher.publish(vel_msg)     
-                t1=rospy.Time.now().to_sec()
+                t1=rospy.Time.now().to_sec() * 1000
             
                 # calculate current position
                 self.curr_angle += vel_msg.angular.z * 2 * np.pi * (t1 - t0)
                 forward_dis =  np.float(vel_msg.linear.x * (t1 - t0))
-                self.loc_x += forward_dis * np.cos(np.float(self.curr_angle))
-                self.loc_y += forward_dis * np.sin(np.float(self.curr_angle))        
+                self.loc_x += forward_dis * np.cos(np.float(self.curr_angle)) * 10 # in meter
+                self.loc_y += forward_dis * np.sin(np.float(self.curr_angle)) * 10 # in meter    
                 self.time_interval += t1 - t0
+                print("POSITION", self.loc_x, self.loc_y, "TIME INTER", self.time_interval)
         
    
 def main(args):

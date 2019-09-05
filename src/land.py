@@ -13,20 +13,16 @@ import zipfile
 import time
 
 
+
 if __name__ == '__main__':
-  pub = rospy.Publisher("ardrone/takeoff", Empty, queue_size=10)
-  rospy.init_node('takeoff', anonymous=True, disable_signals=True)
+  pub_land = rospy.Publisher("ardrone/land", Empty, queue_size=10)
+  rospy.init_node('land', anonymous=True, disable_signals=True)
   rate = rospy.Rate(10) # 10hz
-  while not rospy.is_shutdown(): 
+  while True: 
     try:      
-      pub.publish(Empty())
-      rate.sleep()
+      pass
     except KeyboardInterrupt:
-      break
-  # pub = rospy.Publisher("ardrone/land", Empty, queue_size=10)
-  # while not rospy.is_shutdown():
-  #   pub.publish(Empty())
-
-
+        pub_land.publish(Empty())
+        rate.sleep()
 
 

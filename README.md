@@ -24,12 +24,39 @@ The package is for controlling a drone in simulation.
 
 
 # RL Based Data Collection
-## Collected Sample Data form
+## Test Environment
+![Top View](./assets/env1.png)
+![Main View](./assets/env2.png)
+Coordinates of all obstacles are available at [env.csv](./src/env.csv).
+## State
+| distances to k nearest obstacles (1*k) | angles to k nearest obstacles (1*k) | velocity | yaw | position (1*2) | flying distance till now | \# trips completed |
+|--------------------------------------------------------|---------------------------------------------------|----------|-----|------------------------------|--------------------------|--------------------|
+## Action
+Action space is the combination of actions for velocity and yaws:
+| Action Index | Action                      |
+|--------------|-----------------------------|
+| 0            | velocity +; turn left       |
+| 1            | velocity +; keep forward    |
+| 2            | velocity +; turn right      |
+| 3            | keep velocity; turn left    |
+| 4            | keep velocity; keep forward |
+| 5            | keep velocity; turn right   |
+| 6            | velocity -; turn left       |
+| 7            | velocity -; keep forward    |
+| 8            | velocity -; turn right      |
+## Reward
+Reward is decided by whthter the drone is close to the destination, whether the drone collides into obstacles, how long it takes to get to the destination.
+| Situation          | Reward |
+|--------------------|--------|
+| flying             | -1     |
+| Collide            | -10    |
+| get to destination | 100    |
+## Collected Sample Data
 | State                                                  |                                                   |          |     |                              |                          |                    | Action | Reward  |
 |--------------------------------------------------------|---------------------------------------------------|----------|-----|------------------------------|--------------------------|--------------------|--------|---------|
 | distances to k nearest obstacles (1*k) | angles to k nearest obstacles (1*k) | velocity | yaw | position (1*2) | flying distance till now | \# trips completed | ac     | R_{t+1} |
 
-The data is in [traj.csv](./assets/traj.csv).
+Sample data file: [traj.csv](./assets/traj.csv).
 
 ## Clarifications
 For simulation environment, the Coordinate space of the PTAM map (for drone using [tum_ardrone](https://github.com/tum-vision/tum_ardrone)) and the gazebo world are different. Illustration of coordinate transformation is available at [env_explain.pdf](./assets/env_explain.pdf).

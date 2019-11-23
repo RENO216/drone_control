@@ -113,14 +113,15 @@ class deep_navigation:
         elif Sig == 2 or Sig == 8:
             self.ini =  True
 
-        # the coordinates in "drone" space and "env" space are different, the transformation is shown in ./env_explain.pdf
+        # the coordinates in "drone" space and "env" space are different, the transformation is shown in ../assets/env_explain.pdf
         dis_add = np.sqrt(pow(data.y - self.loc_x, 2) + pow(-data.x - self.loc_y, 2))
         self.loc_x = data.y
         self.loc_y = - data.x
         self.yaw = data.yaw
         self.velo = data.dx
         self.droneState = data.droneState
-        self.dis_accumu += dis_add
+        if self.velo >= 0.1: # make sure that the drone is moving rather than getting stuck by obstacles
+            self.dis_accumu += dis_add
 
         # IF it's in the data collection mode
         if self.col_data_mode and not self.ini:
@@ -138,9 +139,9 @@ class deep_navigation:
                 # write to csv
 
             if not self.w_ini:
-                record_row = np.hstack([np.around(self.temp_record[0,:], 4), self.ac, self.reward])       
-                print(record_row)         
+                record_row = np.hstack([np.around(self.temp_record[0,:], 4), self.ac, self.reward])              
                 with open(self.write_path, 'a+') as file_test:
+                    # print("record:", record_row)  
                     writer = csv.writer(file_test)
                     writer.writerow(record_row)
             
@@ -356,7 +357,7 @@ class deep_navigation:
         angles = np.arctan((ob_ys - self.loc_y)/(ob_xs - self.loc_x))
         # adjust angles
         # np.arctan(1) = pi/4, np.arctan(-1) = -pi/4, thus np.arctan range from (-pi/2, pi/2)
-        # according to the angle illustration in ./env_explain.pdf
+        # according to the angle illustration in ../assets/env_explain.pdf
         ind_adj = ob_ys - self.loc_y < 0
         angles[ind_adj] = pi/2 + angles[ind_adj]
         ind_adj = ob_ys - self.loc_y > 0

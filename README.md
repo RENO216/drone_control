@@ -11,11 +11,11 @@ The package is for controlling a drone in simulation.
 
 **Description:** Two methods of controlling the drone flying smoothly w/o collisions:
 
-* Use RL based algorithm (script 'src/deep_navigation_RL.py' is for sample data collection).
+* Use RL based algorithm (script `src/deep_navigation_RL.py` is for sample data collection).
 
     RL Course project work.
 
-* Use object detection based algorithm ('src/deep_navigation_obDetect.py'), which has two problems:
+* Use object detection based algorithm (script `src/deep_navigation_obDetect.py`), which has two problems:
    
    * Can't detect when getting too close to the obstacles.
    * Can't perform smooth flying (too many sudden stops).
@@ -27,14 +27,14 @@ The package is for controlling a drone in simulation.
 ## Collected Sample Data form
 | State                                                  |                                                   |          |     |                              |                          |                    | Action | Reward  |
 |--------------------------------------------------------|---------------------------------------------------|----------|-----|------------------------------|--------------------------|--------------------|--------|---------|
-| distances to k nearest obstacles ($\in \mathcal{R}^{1\times 3}$) | angles to k nearest obstacles ($\in \mathcal{R}^{1\times 3}$) | velocity | yaw | position ($\in \mathcal{R}^{1\times 2}$) | flying distance till now | \# trips completed | ac     | $R_{t+1}$ |
+| distances to k nearest obstacles (1*k) | angles to k nearest obstacles (1*k) | velocity | yaw | position (1*2) | flying distance till now | \# trips completed | ac     | R_{t+1} |
 
 The data is in [traj.csv](./assets/traj.csv).
 
 ## Clarifications
-For simulation environment, the Coordinate space of the PTAM map (for drone using [tum_ardrone](https://github.com/tum-vision/tum_ardrone)) and the gazebo world are different. Illustration of coordinate transformation is available at [env_explain.pdf](assets/env_explain.pdf).
+For simulation environment, the Coordinate space of the PTAM map (for drone using [tum_ardrone](https://github.com/tum-vision/tum_ardrone)) and the gazebo world are different. Illustration of coordinate transformation is available at [env_explain.pdf](./assets/env_explain.pdf).
 
-To handle with the "angle" w.r.t a drone-obstacle pair, figure illustration is also available at [env_explain.pdf](assets/env_explain.pdf).
+To handle with the "angle" w.r.t a drone-obstacle pair, figure illustration is also available at [env_explain.pdf](./assets/env_explain.pdf).
 
 ## Setting Steps
 1. Build catkin workspace with the required packages and this package in `src` folder. `catkin_make` the workspace.

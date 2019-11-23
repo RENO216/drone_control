@@ -25,14 +25,15 @@ The package is for controlling a drone in simulation.
 
 # RL Based Data Collection
 ## Test Environment
-![Top View](./assets/env1.png)
-![Main View](./assets/env2.png)
+![Top View](./assets/env1.png)![Main View](./assets/env2.png)
+
 Coordinates of all obstacles are available at [env.csv](./src/env.csv).
 ## State
 | distances to k nearest obstacles (1*k) | angles to k nearest obstacles (1*k) | velocity | yaw | position (1*2) | flying distance till now | \# trips completed |
 |--------------------------------------------------------|---------------------------------------------------|----------|-----|------------------------------|--------------------------|--------------------|
 ## Action
 Action space is the combination of actions for velocity and yaws:
+
 | Action Index | Action                      |
 |--------------|-----------------------------|
 | 0            | velocity +; turn left       |
@@ -46,6 +47,7 @@ Action space is the combination of actions for velocity and yaws:
 | 8            | velocity -; turn right      |
 ## Reward
 Reward is decided by whthter the drone is close to the destination, whether the drone collides into obstacles, how long it takes to get to the destination.
+
 | Situation          | Reward |
 |--------------------|--------|
 | flying             | -1     |

@@ -25,8 +25,7 @@ The package is for controlling a drone in simulation.
 
 # RL Based Data Collection
 ## Test Environment
-<img src="./assets/env1.png" height = "300" />
-<img src="./assets/env2.png" height = "300" />
+<img src="./assets/env1.png" height = "300" />      <img src="./assets/env2.png" height = "300" />
 
 Coordinates of all obstacles are available at [env.csv](./src/env.csv).
 ## State

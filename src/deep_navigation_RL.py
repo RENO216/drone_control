@@ -3,12 +3,17 @@
 project script for course RL
 This script collects dataset for RL algorithm
 dataset form is as described from line 79~85
+
+TODO: 
+problem is that every move lasts too short. Need to move function moveRL() to main where can be called with lower frequency
+actually it's action update frequency is too high. move should be updated frequently but action shouldn't be updated too quickly
 """
 import sys, os, math, csv, time
 import rospy
 from std_msgs.msg import String, Empty, Float32
 from drone_control.msg import filter_state, pos_status # message types
 from geometry_msgs.msg import Twist
+from ardrone_autonomy.msg import Navdata
 import numpy as np
 import pandas as pd
 import six.moves.urllib as urllib
@@ -16,6 +21,7 @@ import six.moves.urllib as urllib
 # global parameters
 pi = np.pi
 curtpath = sys.path[0]
+parenpath = os.path.join(sys.path[0], '..')
 
 class deep_navigation:
     """
@@ -36,12 +42,14 @@ class deep_navigation:
                  ):
         
         global curtpath
+        global parenpath
         self.col_data_mode = col_data_mode
 
         self.pos_sub = rospy.Subscriber('/ardrone/predictedPose', filter_state, self.pos_update)
+        self.velo_sub = rospy.Subscriber('/ardrone/navdata', Navdata, self.velo_update) 
         if not col_data_mode:
             self.pos_act_sub = rospy.Subscriber('pos_act_params', pos_status, self.pos_act_update)
-        self.velocity_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        self.velocity_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
 
         self.alpha = 0.5
         self.beta = 0.7
@@ -60,6 +68,7 @@ class deep_navigation:
         # position & direction
         self.loc_x = 0.
         self.loc_y = 0.
+        self.velo = 0.
         self.yaw = 0.
         self.curr_angle = 0. # absolute yaw
         self.forward_speed = forward_speed
@@ -77,7 +86,7 @@ class deep_navigation:
 
             # get environment obstacles coordinates
             self.envob = np.zeros([1,2])
-            envFile = open(str(curtpath + '/env.csv'), "r")
+            envFile = open(str(parenpath + '/assets/env.csv'), "r")
             reader = csv.reader(envFile)
             for item in reader:
                 self.envob = np.vstack([self.envob, np.array(item).astype(float)])
@@ -94,17 +103,20 @@ class deep_navigation:
             self.ac = 0
             self.reward = 0
             self.no_trip = 0
-            self.write_path = str(curtpath + '/traj.csv')
+            self.write_path = str(parenpath + '/assets/traj.csv')
             self.w_ini = True
             
         
-
+    def velo_update(self, data):
+        self.velo = data.vx
+        self.yaw_ardrone = data.rotZ # in degree
 
     def pos_update(self, data):
         """
         Update drone parameters
         """
         global pi
+        factor = 6 # moveRL() would be called every 6 times of pos_update
 
         # check current situation (taking off? landing? etc.)
         Sig = data.droneState
@@ -118,50 +130,13 @@ class deep_navigation:
         self.loc_x = data.y
         self.loc_y = - data.x
         self.yaw = data.yaw
-        self.velo = data.dx
+        # self.velo = data.dx
         self.droneState = data.droneState
         if self.velo >= 0.1: # make sure that the drone is moving rather than getting stuck by obstacles
             self.dis_accumu += dis_add
 
-        # IF it's in the data collection mode
         if self.col_data_mode and not self.ini:
-            """
-            1. update R_{t+1}
-            2. write to csv s, a, R_{t+1}
-            3. update current state s <- s'
-            4. choose action and move to s'
-            """         
-            k = 3
-            # update self.reward
-            self.get_reward()
-            # write to the csv 
-            # if self.time_interval < self.adjust_interval: # since when time interval exceeds, readjust towards the destination
-                # write to csv
-
-            if not self.w_ini:
-                record_row = np.hstack([np.around(self.temp_record[0,:], 4), self.ac, self.reward])              
-                with open(self.write_path, 'a+') as file_test:
-                    # print("record:", record_row)  
-                    writer = csv.writer(file_test)
-                    writer.writerow(record_row)
-            
-            if self.w_ini:
-                self.w_ini = False
-
-            # update **current** position parameters: s <- s'       
-            dists_k, angles_k = self.cal_obs_state(k = k)
-            self.temp_record = np.hstack([dists_k, angles_k, \
-                np.array([self.velo, self.yaw, self.loc_x, self.loc_y, self.dis_accumu, self.no_trip]).reshape([1,-1])])
-            # choose action randomly
-            self.ac = np.random.randint(0, 9)
-            self.action_result(action = self.ac)
-            # move
-            self.moveRL()
-        
-                            
-        # 
-        # 
-        # print("time inter:", self.time_interval)
+            self.col_data_main()
 
 
     """
@@ -256,6 +231,41 @@ class deep_navigation:
     """
     function action_result() and moveRL() are combined for the situation col_data_mode = True
     """
+
+    def col_data_main(self):
+        # print("true v:", self.velo, "data.yaw:", self.yaw, "ardrone_yaw:", self.yaw_ardrone)
+        """
+        1. update R_{t+1}
+        2. write to csv s, a, R_{t+1}
+        3. update current state s <- s'
+        4. choose action and move to s'
+        """         
+        k = 3
+        # update self.reward
+        self.get_reward()
+
+        if not self.w_ini:
+            self.record_row = np.hstack([np.around(self.temp_record[0,:], 4), self.ac, self.reward])          
+            
+        if self.w_ini:
+            self.w_ini = False
+
+        # update **current** position parameters: s <- s'       
+        dists_k, angles_k = self.cal_obs_state(k = k)
+        self.temp_record = np.hstack([dists_k, angles_k, \
+            np.array([self.velo, self.yaw, self.loc_x, self.loc_y, self.dis_accumu, self.no_trip]).reshape([1,-1])])
+        # # choose action randomly
+        # self.ac = np.random.randint(0, 9)
+        # or: choose action from input, can have lower action update frequency
+        self.ac = self.ac_input 
+        self.action_result(action = self.ac)
+        # print("v:", self.forward_speed, "yaw:", self.steer)
+        # move
+        self.moveRL()
+
+    def get_action(self, action = None):
+        self.ac_input = action
+
     def action_result(self, action):
         """
         # velocity +, 0, -; steering left, forward, right. In total 9 actions
@@ -263,16 +273,18 @@ class deep_navigation:
         """
         
         if action // 3 == 0:
-            self.forward_speed += 0.1 if self.forward_speed < 1 else 0 # increase speed (max speed: 1)
+            ad = 0.2
+            self.forward_speed += ad if self.forward_speed < 1 - ad else 0 # increase speed (max speed: 1)
         elif action // 3 == 2:
-            self.forward_speed -= 0.1 if self.forward_speed > 0.1 else 0 # decrease speed (min speed: 0.1)
+            minu = 0.4
+            self.forward_speed -= minu if self.forward_speed > minu else 0 # decrease speed (min speed: 0.1)
         
         if action % 3 == 0:
-            self.steer = 10  # left
+            self.steer = 1.  # left
         elif action % 3 == 1:
             self.steer = 0  # forward
         elif action % 3 == 2:
-            self.steer = -10 # right
+            self.steer = -1. # right
         
     def moveRL(self):
 
@@ -380,35 +392,36 @@ class deep_navigation:
 
         return dists_k, angles_k # both are 1 * k array
         
-
-
     """
     other utils
     """
-
-    def write_to_cvs(filename="default", mat=None, csv_mode='a+'):
-        with open(str(filename + '.csv'), csv_mode) as file_test:
-            for i in range(mat.shape[0]):
-                writer = csv.writer(file_test)
-                writer.writerow(mat[i, :])
+    def write_csv(self):
+        try:
+            if self.droneState == 3 or self.droneState == 7:
+                with open(self.write_path, 'a+') as file_test:                   
+                    writer = csv.writer(file_test)
+                    writer.writerow(self.record_row)
+        except:
+            pass
+            
 
 
 
 def main(args):
     rospy.init_node('deep_navigation', anonymous=True)
-    rate = rospy.Rate(5)  # 5hz
+    rate = rospy.Rate(5)  # hz, frequency of update action and writing to csv
     dn = deep_navigation(dest_x=3.,
                          dest_y=3.,
                          forward_speed=0.5,
                          destination_error=0.2)
-    try:
-        # dn.move()
-        rospy.spin()
-    except KeyboardInterrupt:
-        print("STOP TRIP")
-        while not rospy.is_shutdown():
-            publand.publish(Empty())
-            rate.sleep()
+
+    while not rospy.is_shutdown():
+        dn.write_csv()
+        ac = np.random.randint(0, 9)
+        dn.get_action(action = ac)
+
+        rate.sleep()
+    
 
 
 if __name__ == '__main__':

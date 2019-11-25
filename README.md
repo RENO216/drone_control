@@ -6,6 +6,9 @@ The package is for controlling a drone in simulation.
 **Require Packages:**
 
 * [ardrone_autonomy](https://github.com/AutonomyLab/ardrone_autonomy)
+
+    Tutorials: [Drone Tutorials from Gaitech EDU](https://edu.gaitech.hk/drones/ar_parrot_2/simulation-ar-parrot-2.html)
+
 * [gazebo_ros_pkgs](https://github.com/ros-simulation/gazebo_ros_pkgs/tree/hydro-devel)
 * [tum_ardrone](https://github.com/tum-vision/tum_ardrone)
 
@@ -19,8 +22,6 @@ The package is for controlling a drone in simulation.
    
    * Can't detect when getting too close to the obstacles.
    * Can't perform smooth flying (too many sudden stops).
-
-
 
 
 # RL Based Data Collection
@@ -69,3 +70,7 @@ To handle with the "angle" w.r.t a drone-obstacle pair, figure illustration is a
 1. Build catkin workspace with the required packages and this package in `src` folder. `catkin_make` the workspace.
 2. configure all the parameters in deep_navigation.py
 3. Test, e.g., create a new package for appliations ([an example launch file](./assets/RL_col_data_sim.launch)).
+
+# Notes & Issues
+* Accumulate distance and \# trips are not necessarily taken into account for state.
+* Drone yaw does not make much sense.

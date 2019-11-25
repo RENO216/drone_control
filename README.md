@@ -28,7 +28,7 @@ The package is for controlling a drone in simulation.
 ## Test Environment
 <img src="./assets/env1.png" height = "300" />      <img src="./assets/env2.png" height = "300" />
 
-Coordinates of all obstacles are available at [env.csv](./src/env.csv).
+Coordinates of all obstacles are available at [env.csv](./assets/env.csv).
 ## State
 | distances to k nearest obstacles (1*k) | angles to k nearest obstacles (1*k) | velocity | yaw | position (1*2) | flying distance till now | \# trips completed |
 |--------------------------------------------------------|---------------------------------------------------|----------|-----|------------------------------|--------------------------|--------------------|
@@ -53,7 +53,7 @@ Reward is decided by whthter the drone is close to the destination, whether the 
 |--------------------|--------|
 | flying             | -1     |
 | Collide            | -10    |
-| get to destination | 100    |
+
 ## Collected Sample Data
 | State                                                  |                                                   |          |     |                              |                          |                    | Action | Reward  |
 |--------------------------------------------------------|---------------------------------------------------|----------|-----|------------------------------|--------------------------|--------------------|--------|---------|

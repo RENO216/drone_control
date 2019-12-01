@@ -14,6 +14,7 @@ from std_msgs.msg import String, Empty, Float32
 from drone_control.msg import filter_state, pos_status # message types
 from geometry_msgs.msg import Twist
 from ardrone_autonomy.msg import Navdata
+from dqn_batch import DQNAgent
 import numpy as np
 import pandas as pd
 import six.moves.urllib as urllib
@@ -25,10 +26,7 @@ parenpath = os.path.join(sys.path[0], '..')
 
 class deep_navigation:
     """
-    Script for drone navigation using tensorflow object detection API
-    Problems:
-        Can't detect objects when getting too close to an object
-        Not smooth control
+    Script for drone navigation using RL
     """
     def __init__(self,
                  dest_x=0.,
@@ -48,7 +46,10 @@ class deep_navigation:
         self.pos_sub = rospy.Subscriber('/ardrone/predictedPose', filter_state, self.pos_update)
         self.velo_sub = rospy.Subscriber('/ardrone/navdata', Navdata, self.velo_update) 
         if not col_data_mode:
-            self.pos_act_sub = rospy.Subscriber('pos_act_params', pos_status, self.pos_act_update)
+            self.state_size = 10
+            self.action_size = 9
+            self.agent = DQNAgent(self.state_size, self.action_size)
+            self.agent.load(str(parenpath + '/ckpt/proj-dqn.h5'))
         self.velocity_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
 
         self.alpha = 0.5
@@ -78,19 +79,20 @@ class deep_navigation:
         self.dest_x = dest_x
         self.dest_y = dest_y
 
+        # get environment obstacles coordinates
+        self.envob = np.zeros([1,2])
+        envFile = open(str(parenpath + '/assets/env.csv'), "r")
+        reader = csv.reader(envFile)
+        for item in reader:
+            self.envob = np.vstack([self.envob, np.array(item).astype(float)])
+        self.envob = self.envob[1:, :]
+
         # whether initialization
         # This step is necessary since the drone needs time to settle up in the initial state, o.w. it will not be stable while taking off
         self.ini = True
-        
+        self.w_ini = True
+       
         if self.col_data_mode:
-
-            # get environment obstacles coordinates
-            self.envob = np.zeros([1,2])
-            envFile = open(str(parenpath + '/assets/env.csv'), "r")
-            reader = csv.reader(envFile)
-            for item in reader:
-                self.envob = np.vstack([self.envob, np.array(item).astype(float)])
-            self.envob = self.envob[1:, :]
 
             # record performance data
             # state:
@@ -104,7 +106,7 @@ class deep_navigation:
             self.reward = 0
             self.no_trip = 0
             self.write_path = str(parenpath + '/assets/traj.csv')
-            self.w_ini = True
+            
             
         
     def velo_update(self, data):
@@ -135,8 +137,12 @@ class deep_navigation:
         if self.velo >= 0.1: # make sure that the drone is moving rather than getting stuck by obstacles
             self.dis_accumu += dis_add
 
-        if self.col_data_mode and not self.ini:
-            self.col_data_main()
+        if not self.ini:
+            if self.col_data_mode:
+                self.col_data_main()
+            else:
+                self.update_state()
+            
 
 
     """
@@ -227,6 +233,20 @@ class deep_navigation:
                 t1 = rospy.Time.now().to_sec() * self.time_multi
                 self.time_interval += t1 - t0
     
+    def update_state(self):
+        global pi
+        k = 3
+        # update current state
+        dists_k, angles_k = self.cal_obs_state(k = k)
+        self.state = np.hstack([dists_k, angles_k, np.array([self.velo/1000, self.yaw/180*pi, self.loc_x, self.loc_y]).reshape([1,-1])])
+        self.moveRL()
+   
+    def run_main(self):      
+        # choose action from input, can have lower action update frequency
+        self.ac = self.agent.act(self.state, False)
+        self.action_result(action = self.ac)
+        print(self.steer, self.forward_speed)
+        
 
     """
     function action_result() and moveRL() are combined for the situation col_data_mode = True
@@ -406,19 +426,29 @@ class deep_navigation:
             
 
 
-
 def main(args):
+    global pi
     rospy.init_node('deep_navigation', anonymous=True)
-    rate = rospy.Rate(5)  # hz, frequency of update action and writing to csv
+    rate = rospy.Rate(5)  # hz, frequency of update action, and writing to csv if train
+    train = False
     dn = deep_navigation(dest_x=3.,
                          dest_y=3.,
                          forward_speed=0.5,
-                         destination_error=0.2)
+                         destination_error=0.2,
+                         col_data_mode= train
+                         )
 
     while not rospy.is_shutdown():
-        dn.write_csv()
-        ac = np.random.randint(0, 9)
-        dn.get_action(action = ac)
+        if train:
+            dn.write_csv()
+            ac = np.random.randint(0, 9)
+            dn.get_action(action = ac)
+        else:
+            try:
+                dn.run_main()
+            except:
+                pass
+        
 
         rate.sleep()
     

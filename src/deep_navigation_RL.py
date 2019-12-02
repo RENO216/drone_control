@@ -14,10 +14,11 @@ from std_msgs.msg import String, Empty, Float32
 from drone_control.msg import filter_state, pos_status # message types
 from geometry_msgs.msg import Twist
 from ardrone_autonomy.msg import Navdata
+import six.moves.urllib as urllib
 from dqn_batch import DQNAgent
 import numpy as np
 import pandas as pd
-import six.moves.urllib as urllib
+
 
 # global parameters
 pi = np.pi
@@ -71,6 +72,7 @@ class deep_navigation:
         self.loc_y = 0.
         self.velo = 0.
         self.yaw = 0.
+        self.condi = 2 # landed
         self.curr_angle = 0. # absolute yaw
         self.forward_speed = forward_speed
         self.dis_accumu = 0. # Accumulated flying distance 
@@ -105,7 +107,7 @@ class deep_navigation:
             self.ac = 0
             self.reward = 0
             self.no_trip = 0
-            self.write_path = str(parenpath + '/assets/traj.csv')
+            self.write_path = str(parenpath + '/assets/traj_3acs.csv')
             
             
         
@@ -121,7 +123,7 @@ class deep_navigation:
         factor = 6 # moveRL() would be called every 6 times of pos_update
 
         # check current situation (taking off? landing? etc.)
-        Sig = data.droneState
+        self.condi = Sig = data.droneState
         if Sig == 3 or Sig == 4: # hovering or flying
             self.ini =  False
         elif Sig == 2 or Sig == 8:
@@ -132,6 +134,7 @@ class deep_navigation:
         self.loc_x = data.y
         self.loc_y = - data.x
         self.yaw = data.yaw
+        # print(self.yaw)
         # self.velo = data.dx
         self.droneState = data.droneState
         if self.velo >= 0.1: # make sure that the drone is moving rather than getting stuck by obstacles
@@ -148,90 +151,6 @@ class deep_navigation:
     """
     function pos_act_update() and move() are combined for the situation col_data_mode = False
     """
-    def pos_act_update(self, data):
-        """
-        Used when col_data_mode is False, i.e., while collecting data samples this function wouldn't be called
-        """
-        self.steer = data.steer
-        self.coll = data.coll_prob
-        self.disToObj = data.dis_to_obj
-        self.move()
-
-    def move(self):
-
-        def sgn(x): return 1. if x > 0 else -1. if x < 0 else 0.
-        global pi
-
-        adjust_interval = self.adjust_interval
-        vel_msg = Twist()
-        vel_msg.linear.y = 0
-        vel_msg.linear.z = 0
-        vel_msg.angular.x = 0
-        vel_msg.angular.y = 0
-        self.curr_angle = self.yaw / 180 * pi
-
-        # arrived at destination
-        if abs(self.loc_x - self.dest_x) <= self.destination_error and abs(self.loc_y - self.dest_y) <= self.destination_error:
-            vel_msg.linear.x = 0
-            vel_msg.angular.z = 0
-            self.velocity_publisher.publish(vel_msg)
-            print("Arrived ", self.loc_x, self.loc_y)
-            self.temp_record[-1] += 1 # complete one trip, trip +1
-
-            # redefine a destination
-            self.dest_x = np.random.randint(-3,5)
-            self.dest_y = np.random.randint(-3,5)
-
-        # whether hovering/flying
-        elif self.droneState != 3 and self.droneState != 4 and self.droneState != 7:
-            vel_msg.linear.x = 0
-            vel_msg.angular.z = 0
-            self.velocity_publisher.publish(vel_msg)
-            # print("Not Flying")
-
-        # during flying
-        else:
-            # adjust direction towards destination
-            if self.time_interval >= adjust_interval:
-                self.ini = False
-                vel_msg.linear.x = 0 # set forward speed to 0
-                dest_angle = np.arctan((self.dest_y - self.loc_y)/(self.dest_x - self.loc_x))
-
-                if self.dest_x - self.loc_x < 0:
-                    dest_angle = -(pi/2 + dest_angle)
-                if self.dest_x - self.loc_x > 0:
-                    dest_angle = pi/2 - dest_angle
-
-                # print("Adjust!", self.loc_x, self.loc_y, "curren angle:", self.yaw, "dest angle: ", dest_angle / pi * 180)
-
-                if abs(self.yaw - dest_angle / pi * 180) <= 15:
-                    print("-------------------------direction reset done!-------------------------------")
-                    self.time_interval = 0
-                    vel_msg.angular.z = 0
-                else:
-                    # clockwilse z-;
-                    vel_msg.angular.z = - sgn(dest_angle - self.curr_angle)
-                self.velocity_publisher.publish(vel_msg)
-
-            # move forward and avoid collision
-            else:
-                t0 = rospy.Time.now().to_sec() * self.time_multi
-                if self.ini == True:
-                    print(str('-------------------------Initiation-------------------------' + str(self.time_interval)))
-                    vel_msg.linear.x = 0
-                    vel_msg.angular.z = 0
-                else:
-                    if self.coll <= 0.9:
-                        vel_msg.linear.x = self.forward_speed
-                        vel_msg.angular.z = 0
-                    else:
-                        vel_msg.linear.x = 0.
-                        vel_msg.angular.z = sgn(self.steer)
-                
-                self.velocity_publisher.publish(vel_msg)
-
-                t1 = rospy.Time.now().to_sec() * self.time_multi
-                self.time_interval += t1 - t0
     
     def update_state(self):
         global pi
@@ -243,10 +162,39 @@ class deep_navigation:
    
     def run_main(self):      
         # choose action from input, can have lower action update frequency
-        self.ac = self.agent.act(self.state, False)
+        dists, _ = self.params_obstacle()
+        if np.min(dists) > 0.8:
+            self.ac = 1 # v = 0.5; steer = 0 
+        else:
+            self.ac = self.agent.act(self.state, False)
         self.action_result(action = self.ac)
-        print(self.steer, self.forward_speed)
-        
+
+    def head_to_dest_adjust(self):
+        def sgn(x): return 1. if x > 0 else -1. if x < 0 else 0.
+        if self.condi == 3 or self.condi == 4:    # while flying or hovering
+            self.forward_speed = 0. # set forward speed to 0
+            # angle of destination is available at ../assets/env_explain.pdf
+            dest_angle = np.arctan((self.dest_y - self.loc_y)/(self.dest_x - self.loc_x))
+
+            # make sure the dest_angle is in range (-pi, pi)
+            if self.dest_x - self.loc_x > 0:
+                dest_angle = - dest_angle
+            if self.dest_x - self.loc_x < 0:
+                dest_angle = pi - dest_angle if dest_angle > 0 else - dest_angle - pi
+
+            # print("Adjust!", self.loc_x, self.loc_y, "curren angle:", self.yaw, "dest angle: ", dest_angle / pi * 180)
+
+            if abs(self.yaw - dest_angle / pi * 180) <= 20:
+                print("-------------------------direction reset done!-------------------------------")
+                self.steer = 0.
+                self.forward_speed = 0.5
+                return False
+            else:
+                # print(dest_angle / pi * 180)
+                # clockwilse z-;
+                self.steer = - sgn(dest_angle / pi * 180 - self.yaw)
+                return True
+            
 
     """
     function action_result() and moveRL() are combined for the situation col_data_mode = True
@@ -291,20 +239,34 @@ class deep_navigation:
         # velocity +, 0, -; steering left, forward, right. In total 9 actions
         This function is used if col_data_mode = True
         """
+        # # 9 actions
+        # if action // 3 == 0:
+        #     ad = 0.2
+        #     self.forward_speed += ad if self.forward_speed < 1 - ad else 0 # increase speed (max speed: 1)
+        # elif action // 3 == 2:
+        #     minu = 0.4
+        #     self.forward_speed -= minu if self.forward_speed > minu else 0 # decrease speed (min speed: 0.1)
         
-        if action // 3 == 0:
-            ad = 0.2
-            self.forward_speed += ad if self.forward_speed < 1 - ad else 0 # increase speed (max speed: 1)
-        elif action // 3 == 2:
-            minu = 0.4
-            self.forward_speed -= minu if self.forward_speed > minu else 0 # decrease speed (min speed: 0.1)
-        
+        # if action % 3 == 0:
+        #     self.steer = 1.  # left
+        # elif action % 3 == 1:
+        #     self.steer = 0  # forward
+        # elif action % 3 == 2:
+        #     self.steer = -1. # right (clockwise)
+
+        # 3 actions
         if action % 3 == 0:
             self.steer = 1.  # left
+            self.forward_speed = 0.2
         elif action % 3 == 1:
             self.steer = 0  # forward
+            self.forward_speed = 0.5
         elif action % 3 == 2:
-            self.steer = -1. # right
+            self.steer = -1. # right (clockwise)
+            self.forward_speed = 0.2
+
+
+
         
     def moveRL(self):
 
@@ -325,28 +287,6 @@ class deep_navigation:
 
         # take actions when it's not initial state and the drone is flying rather than landing on the ground
         if not self.ini:
-            # # adjust towards the destination o.w. we don't know the drone will fly to where
-            # if self.time_interval >= adjust_interval:
-            #     self.ini = False
-            #     vel_msg.linear.x = 0 # set forward speed to 0
-            #     dest_angle = np.arctan((self.dest_y - self.loc_y)/(self.dest_x - self.loc_x))
-
-            #     if self.dest_x - self.loc_x < 0:
-            #         dest_angle = -(pi/2 + dest_angle)
-            #     if self.dest_x - self.loc_x > 0:
-            #         dest_angle = pi/2 - dest_angle
-
-            #     # print("Adjust!", self.loc_x, self.loc_y, "curren angle:", self.yaw, "dest angle: ", dest_angle / pi * 180)
-
-            #     if abs(self.yaw - dest_angle / pi * 180) <= 15:
-            #         # print("-------------------------direction reset done!-------------------------------")
-            #         self.time_interval = 0
-            #         vel_msg.angular.z = 0
-            #     else:
-            #         # clockwilse z-;
-            #         vel_msg.angular.z = - sgn(dest_angle - self.curr_angle)
-
-            # else: # simply randomly flying
             vel_msg.linear.x = self.forward_speed
             vel_msg.angular.z = self.steer
             self.velocity_publisher.publish(vel_msg)
@@ -390,10 +330,10 @@ class deep_navigation:
         # adjust angles
         # np.arctan(1) = pi/4, np.arctan(-1) = -pi/4, thus np.arctan range from (-pi/2, pi/2)
         # according to the angle illustration in ../assets/env_explain.pdf
-        ind_adj = ob_ys - self.loc_y < 0
+        ind_adj = ob_xs - self.loc_x < 0
         angles[ind_adj] = pi/2 + angles[ind_adj]
-        ind_adj = ob_ys - self.loc_y > 0
-        angles[ind_adj] = - angles[ind_adj]
+        ind_adj = ob_xs - self.loc_x > 0
+        angles[ind_adj] = - pi/2 + angles[ind_adj]
         return dists, angles
 
     def cal_obs_state(self, k = 3):
@@ -430,9 +370,11 @@ def main(args):
     global pi
     rospy.init_node('deep_navigation', anonymous=True)
     rate = rospy.Rate(5)  # hz, frequency of update action, and writing to csv if train
+    adj_count = 5 #  count for a proper time to fly towards the destination
+    adj_period = 10
     train = False
     dn = deep_navigation(dest_x=3.,
-                         dest_y=3.,
+                         dest_y=-3.,
                          forward_speed=0.5,
                          destination_error=0.2,
                          col_data_mode= train
@@ -441,15 +383,20 @@ def main(args):
     while not rospy.is_shutdown():
         if train:
             dn.write_csv()
-            ac = np.random.randint(0, 9)
+            ac = np.random.randint(0, 3)
             dn.get_action(action = ac)
         else:
             try:
-                dn.run_main()
+                if adj_count == adj_period:
+                    while dn.head_to_dest_adjust():
+                        pass
+                    if not dn.head_to_dest_adjust():
+                        adj_count = 0
+                else:
+                    dn.run_main()
+                    adj_count += 1 if adj_count + 1 <= adj_period else 0
             except:
                 pass
-        
-
         rate.sleep()
     
 

@@ -3,13 +3,13 @@ import numpy as np
 
 pi = np.pi
 parenpath = os.path.join(sys.path[0], '..')
-def readCSV(state_size, action_size):
+def readCSV(state_size, action_size, filename=None):
     """
     The function is for reading dataset.
     """
     global parenpath
     memory = []
-    with open(str(parenpath + '/assets/traj.csv'),'r') as csvfile:
+    with open(str(parenpath + '/assets/' + filename),'r') as csvfile:
         reader = csv.reader(csvfile)
         for oneline in reader:
             memory.append(map(float, oneline))

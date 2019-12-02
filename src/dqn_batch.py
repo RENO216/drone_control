@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-import random, csv
+"""
+This script is used for training checkpoints if directly run.
+"""
+import random, csv, os, sys
 from tqdm import tqdm
 import numpy as np
 from collections import deque
@@ -10,10 +13,11 @@ from readCSV import readCSV
 
 EPISODES = 1000
 state_size = 10
-action_size = 9
+action_size = 3
 pi = np.pi
+parenpath = os.path.join(sys.path[0], '..')
 
-memory = readCSV(state_size, action_size)
+memory = readCSV(state_size, action_size, filename='traj_3acs.csv')
 
 class DQNAgent:
     def __init__(self, state_size, action_size):
@@ -22,7 +26,7 @@ class DQNAgent:
         self.action_size = action_size
         # self.memory = deque(maxlen=2000)
         self.memory = memory
-        self.gamma = 0.95    # discount rate
+        self.gamma = 0.5   # discount rate
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
@@ -35,7 +39,7 @@ class DQNAgent:
         model = Sequential()
         model.add(Dense(24, input_dim=self.state_size, activation='relu'))
         model.add(Dense(24, activation='relu'))
-        model.add(Dense(self.action_size, activation='linear'))
+        model.add(Dense(self.action_size, activation='softmax'))
         model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
         return model
 
@@ -99,22 +103,15 @@ if __name__ == "__main__":
         state = memory[0][:state_size]
         state = np.reshape(state, [1, state_size])
         for time in range(500):
-            # env.render()
-            # action = agent.act(state)
-            # next_state, reward, done, _ = env.step(action)
-            # reward = reward if not done else -10
-            # next_state = np.reshape(next_state, [1, state_size])
-            # agent.remember(state, action, reward, next_state, done)
-            # state = next_state
-            # if done:
-            #     print("episode: {}/{}, score: {}, e: {:.2}"
-            #           .format(e, EPISODES, time, agent.epsilon))
-            #     break
             if len(agent.memory) > batch_size:
                 loss = agent.replay(batch_size)
                 # Logging training loss every 10 timesteps
                 if time % 10 == 0:
                     print("episode: {}/{}, time: {}, loss: {:.4f}".format(e, EPISODES, time, loss))  
+                    with open(str(parenpath + "/assets/loss_3acs.csv"), 'a+') as file_test:                   
+                        writer = csv.writer(file_test)
+                        # step, loss
+                        writer.writerow(np.array([e * 500 + time, loss]))
         # if  % 10 == 0:
-        if loss <= 50:
-            agent.save("./save/proj-dqn.h5")
+        if loss <= 1:
+            agent.save(str(parenpath + "/ckpt/proj-dqn_3acs.h5"))

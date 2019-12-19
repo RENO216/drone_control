@@ -35,22 +35,25 @@ class deep_navigation:
                  adjust_interval=10.,
                  forward_speed=0.5,
                  destination_error=0.5,
-                 k_near = 2, # the nearest obstacles to the drone
-                 col_data_mode = True, # whether is collecting data samples for RL training
-                 k = 3 # state parameters of k nearest obstacles
+                 col_data_mode=None, # whether is collecting data samples for RL training
+                 poli_update = False,
+                 k = 3, # state parameters of k nearest obstacles
+                 dataset=None, # write to sample dataset
+                 ckptload=None # load trained checkpoints
                  ):
         
         global curtpath
         global parenpath
         self.col_data_mode = col_data_mode
+        self.poli_update = poli_update
 
         self.pos_sub = rospy.Subscriber('/ardrone/predictedPose', filter_state, self.pos_update)
         self.velo_sub = rospy.Subscriber('/ardrone/navdata', Navdata, self.velo_update) 
-        if not col_data_mode:
+        if not col_data_mode or poli_update:
             self.state_size = 10
-            self.action_size = 9
-            self.agent = DQNAgent(self.state_size, self.action_size)
-            self.agent.load(str(parenpath + '/ckpt/proj-dqn.h5'))
+            self.action_size = 3
+            self.agent = DQNAgent(self.state_size, self.action_size, filename=dataset)
+            self.agent.load(str(parenpath + '/ckpt/' + ckptload))
         self.velocity_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
 
         self.alpha = 0.5
@@ -94,7 +97,7 @@ class deep_navigation:
         self.ini = True
         self.w_ini = True
        
-        if self.col_data_mode:
+        if self.col_data_mode or self.poli_update:
 
             # record performance data
             # state:
@@ -107,7 +110,7 @@ class deep_navigation:
             self.ac = 0
             self.reward = 0
             self.no_trip = 0
-            self.write_path = str(parenpath + '/assets/traj_3acs.csv')
+            self.write_path = str(parenpath + '/assets/' + dataset)
             
             
         
@@ -120,31 +123,33 @@ class deep_navigation:
         Update drone parameters
         """
         global pi
-        factor = 6 # moveRL() would be called every 6 times of pos_update
 
         # check current situation (taking off? landing? etc.)
-        self.condi = Sig = data.droneState
+        self.droneState = self.condi = Sig = data.droneState
         if Sig == 3 or Sig == 4: # hovering or flying
             self.ini =  False
         elif Sig == 2 or Sig == 8:
             self.ini =  True
 
-        # the coordinates in "drone" space and "env" space are different, the transformation is shown in ../assets/env_explain.pdf
-        dis_add = np.sqrt(pow(data.y - self.loc_x, 2) + pow(-data.x - self.loc_y, 2))
+        # the coordinates in "drone" space and "env" space are different, the transformation is shown in ../assets/env_explain.pdf 
+        # dis_add = np.sqrt(pow(data.y - self.loc_x, 2) + pow(-data.x - self.loc_y, 2))
         self.loc_x = data.y
         self.loc_y = - data.x
+        self.loc_z = data.z
         self.yaw = data.yaw
         # print(self.yaw)
         # self.velo = data.dx
-        self.droneState = data.droneState
-        if self.velo >= 0.1: # make sure that the drone is moving rather than getting stuck by obstacles
-            self.dis_accumu += dis_add
+        # if self.velo >= 0.1: # make sure that the drone is moving rather than getting stuck by obstacles
+        #     self.dis_accumu += dis_add
 
         if not self.ini:
             if self.col_data_mode:
                 self.col_data_main()
             else:
                 self.update_state()
+                if self.poli_update:
+                    self.col_data_main()
+            self.moveRL()
             
 
 
@@ -158,16 +163,34 @@ class deep_navigation:
         # update current state
         dists_k, angles_k = self.cal_obs_state(k = k)
         self.state = np.hstack([dists_k, angles_k, np.array([self.velo/1000, self.yaw/180*pi, self.loc_x, self.loc_y]).reshape([1,-1])])
-        self.moveRL()
    
-    def run_main(self):      
-        # choose action from input, can have lower action update frequency
+    def run_main(self, isEval = False):  
+        # choose action from input, can have lower action update frequency        
         dists, _ = self.params_obstacle()
-        if np.min(dists) > 0.8:
+        if np.min(dists) > 1.5 and not self.col_data_mode:
             self.ac = 1 # v = 0.5; steer = 0 
         else:
-            self.ac = self.agent.act(self.state, False)
+            if not self.ini:
+                self.ac = self.agent.act(self.state, False)
+                print(self.ac)
+        
+        if isEval:
+        # test how many times the drone changes the direction
+            if self.droneState == 3 or self.droneState == 7:
+                with open(str(parenpath + '/assets/eval_new.csv'), 'a+') as file_test:  
+                    writer = csv.writer(file_test)
+                    if self.ac != 1:
+                        turned = 1
+                    else:
+                        turned = 0
+
+                    # record reward property
+                    self.get_reward()
+                    writer.writerow(np.array([turned, self.reward]))
+             
         self.action_result(action = self.ac)
+
+        
 
     def head_to_dest_adjust(self):
         def sgn(x): return 1. if x > 0 else -1. if x < 0 else 0.
@@ -225,11 +248,11 @@ class deep_navigation:
         # # choose action randomly
         # self.ac = np.random.randint(0, 9)
         # or: choose action from input, can have lower action update frequency
-        self.ac = self.ac_input 
+        if self.col_data_mode:
+            self.ac = self.ac_input 
         self.action_result(action = self.ac)
         # print("v:", self.forward_speed, "yaw:", self.steer)
         # move
-        self.moveRL()
 
     def get_action(self, action = None):
         self.ac_input = action
@@ -257,13 +280,13 @@ class deep_navigation:
         # 3 actions
         if action % 3 == 0:
             self.steer = 1.  # left
-            self.forward_speed = 0.2
+            self.forward_speed = 0.5 
         elif action % 3 == 1:
             self.steer = 0  # forward
-            self.forward_speed = 0.5
+            self.forward_speed = 0.7
         elif action % 3 == 2:
             self.steer = -1. # right (clockwise)
-            self.forward_speed = 0.2
+            self.forward_speed = 0.5
 
 
 
@@ -278,7 +301,13 @@ class deep_navigation:
         vel_msg = Twist()
         vel_msg.linear.x = 0
         vel_msg.linear.y = 0
-        vel_msg.linear.z = 0
+
+        # make drone higher than the cabines
+        if self.loc_z <= 1.2:
+            vel_msg.linear.z = 1
+        else:
+            vel_msg.linear.z = 0
+
         vel_msg.angular.x = 0
         vel_msg.angular.y = 0
         vel_msg.angular.z = 0
@@ -310,10 +339,14 @@ class deep_navigation:
             self.reward = 100 / (error_x + error_y)            
             self.no_trip += 1 # complete one trip, trip +1
 
+        # restriction for action changing
+        if self.ac != 1: 
+            self.reward = -5
+        
         # collision with obstacles
         dists, _ = self.params_obstacle()
         if min(dists) <= 0.8:
-            self.reward = - 10     
+            self.reward = - 10   
 
     def params_obstacle(self):    
         global pi
@@ -366,26 +399,43 @@ class deep_navigation:
             
 
 
-def main(args):
+def main():
     global pi
+
     rospy.init_node('deep_navigation', anonymous=True)
-    rate = rospy.Rate(5)  # hz, frequency of update action, and writing to csv if train
-    adj_count = 5 #  count for a proper time to fly towards the destination
+
+    fre = rospy.get_param('~rate') # frequency of update action, and writing to csv if train
+    train = rospy.get_param('~isTrain') # whether is training
+    dataset = rospy.get_param('~dataset') # sample data for training
+    ckptload = rospy.get_param('~ckptload') # ckpt file name to be loaded\
+    poli_update = rospy.get_param('~poliIter') # whether use previous trained checkpoints to re-get dataset (policy iteration)
+
+    
+    rate = rospy.Rate(fre)  # hz, frequency of update action, and writing to csv if train
+    adj_count = 6 #  count for a proper time to fly towards the destination
     adj_period = 10
-    train = False
     dn = deep_navigation(dest_x=3.,
                          dest_y=-3.,
                          forward_speed=0.5,
                          destination_error=0.2,
-                         col_data_mode= train
+                         col_data_mode= train,
+                         poli_update=poli_update,
+                         dataset = dataset,
+                         ckptload = ckptload
                          )
 
     while not rospy.is_shutdown():
-        if train:
+        if train or poli_update:
+            # train mode
             dn.write_csv()
-            ac = np.random.randint(0, 3)
-            dn.get_action(action = ac)
+            if train:
+                ac = np.random.randint(0, 3)
+                dn.get_action(action = ac)
+            elif poli_update:
+                dn.run_main(isEval=True)
+            
         else:
+            # test mode
             try:
                 if adj_count == adj_period:
                     while dn.head_to_dest_adjust():
@@ -393,7 +443,7 @@ def main(args):
                     if not dn.head_to_dest_adjust():
                         adj_count = 0
                 else:
-                    dn.run_main()
+                    dn.run_main(isEval=True) # run_main is just updating action
                     adj_count += 1 if adj_count + 1 <= adj_period else 0
             except:
                 pass
@@ -402,4 +452,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
